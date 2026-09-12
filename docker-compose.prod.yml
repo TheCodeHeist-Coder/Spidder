@@ -5,16 +5,19 @@
 #
 # WHICH COMPOSE FILE IS WHICH
 # ---------------------------
-#   docker-compose.dev.yml   infra only, for `pnpm dev` against local sources
-#   docker-compose.yml       the whole stack in containers, one command, for
-#                            trying the app on a laptop
+#   docker-compose.yml       the default — hot-reload dev stack, everything in
+#                            containers, for working on the app
 #   docker-compose.prod.yml  THIS FILE — a real deployment on a real server
 #
-# DIFFERENT FROM docker-compose.yml IN ONE IMPORTANT WAY
-# ------------------------------------------------------
-# Postgres and Redis are NOT containers here. They run on the VPS host, managed
-# by systemd, with their own backup and upgrade story. Only the application
-# services and the Piston sandbox are containerised.
+# DIFFERENT FROM docker-compose.yml IN TWO IMPORTANT WAYS
+# -------------------------------------------------------
+# 1. Images are PULLED from Docker Hub, not built from local sources. The
+#    `build:` blocks below exist only so CI can build and push them; the server
+#    never builds, it pulls a tag.
+#
+# 2. Postgres and Redis are NOT containers here. They run on the VPS host,
+#    managed by systemd, with their own backup and upgrade story. Only the
+#    application services and the Piston sandbox are containerised.
 #
 # That means the app containers have to reach back out to the host. On Linux
 # that is not automatic: `host.docker.internal` resolves only because each
@@ -39,8 +42,9 @@
 #      password is a Redis reachable by anything that gets a shell in any
 #      container.
 #
-# See DEPLOYMENT.md for the full host setup, including the firewall rules
-# that keep 5432/6379 off the public internet.
+# The host also needs firewall rules keeping 5432/6379 off the public internet:
+# the bridge mapping above is what the containers use, and it must not double as
+# a door from outside. Bind those ports to the bridge and loopback only.
 #
 # IMAGES
 # ------

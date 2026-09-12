@@ -40,12 +40,16 @@ docker compose down -v       # wipe the database too
 
 ### Development, with hot reload
 
-```bash
-docker compose -f docker-compose.dev.yml up --build
-```
+Nothing more to run — the stack above already does this. Your source is
+bind-mounted and the servers restart on change, so edit a file on your host and
+the containers pick it up in about a second.
 
-Same stack, but your source is bind-mounted and the servers restart on change —
-edit a file on your host and the containers pick it up in about a second.
+There are only two compose files, and this is the default one:
+
+| File | Use |
+| --- | --- |
+| `docker-compose.yml` | everything above — local development |
+| `docker-compose.prod.yml` | deploying to a server — see the comments in that file |
 
 ### Ports
 
