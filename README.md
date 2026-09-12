@@ -28,11 +28,8 @@ installs the Python 3.12 runtime into the code sandbox — automatically. The ap
 services wait for all of it, so the first request can never hit an unmigrated
 database or an empty sandbox.
 
-Developing? Use the hot-reload stack instead:
-
-```bash
-docker compose -f docker-compose.dev.yml up --build
-```
+Your source is bind-mounted, so this is already the hot-reload stack: edit a
+file on your host and the containers pick it up in about a second.
 
 Full instructions, including running without Docker, are in **[SETUP.md](SETUP.md)**.
 
@@ -304,16 +301,19 @@ spidder/
 ├── .github/workflows/
 │   ├── ci.yml              lint · typecheck · test · build
 │   └── deploy.yml          build images → Docker Hub → roll out on the VPS
-├── docker-compose.yml       full stack in containers (local)
-├── docker-compose.dev.yml   hot-reload dev stack
+├── docker-compose.yml       hot-reload dev stack (the default)
 └── docker-compose.prod.yml  VPS deploy — host Postgres/Redis
 ```
 
 ### Deploying
 
-See [DEPLOYMENT.md](DEPLOYMENT.md). Production runs Postgres and Redis on the
-host and only the app services in Docker, so the compose file and the host
-setup have to agree — that guide covers both.
+`docker-compose.prod.yml` is the deployment stack, and `.github/workflows/deploy.yml`
+drives it: build images, push to Docker Hub, roll them out over SSH. Both files
+are commented with what they expect.
+
+Production runs Postgres and Redis on the host and only the app services in
+Docker, so the compose file and the host setup have to agree. The detailed
+runbook for that is kept out of this repo — it describes one specific server.
 
 ### Data model
 

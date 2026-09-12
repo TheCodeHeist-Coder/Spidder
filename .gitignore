@@ -41,3 +41,9 @@ dist/
 # Python
 __pycache__/
 *.pyc
+
+# Deployment runbooks. Kept out of the repo because they describe one specific
+# server — its paths, its host setup, its operational habits — which is detail
+# a public repo does not need and an operator reads from their own copy.
+DEPLOYMENT.md
+DEPLOY-WALKTHROUGH.md
