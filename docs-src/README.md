@@ -8,7 +8,7 @@ regenerate — do not edit the PDFs directly.
 | `01-technical-approach.md` | `docs/01-technical-approach.pdf` |
 | `02-why-what-how.md` | `docs/02-why-what-how.pdf` |
 | `03-user-guide.md` | `docs/03-user-guide.pdf` |
-| *(all three)* | `docs/combatx-documentation.pdf` |
+| *(all three)* | `docs/spidder-documentation.pdf` |
 
 ## Regenerating
 

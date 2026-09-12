@@ -31,7 +31,7 @@ export function AdminArtwork() {
   return (
     <div className="relative flex h-full flex-col justify-center overflow-hidden px-8 py-12 xl:px-14">
       {/* The player app's two-tone wash — blue left, orange right — so the
-          console's door looks like the rest of CombatX. */}
+          console's door looks like the rest of Spidder. */}
       <div
         className="pointer-events-none absolute inset-0"
         aria-hidden

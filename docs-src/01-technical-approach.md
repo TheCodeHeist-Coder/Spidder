@@ -1,13 +1,13 @@
 # Technical Approach & Architecture
 
-**CombatX** — real-time competitive coding battles  
+**Spidder** — real-time competitive coding battles  
 Document 1 of 3 · [Why/What/How](02-why-what-how.md) · [User Guide](03-user-guide.md)
 
 ---
 
 ## 1. System overview
 
-CombatX is a pnpm/Turborepo monorepo containing four runtime services and five
+Spidder is a pnpm/Turborepo monorepo containing four runtime services and five
 shared packages. The browser holds two connections: REST to `http-api` for
 transactional work, and a long-lived WebSocket to `ws-server` for the battle.
 

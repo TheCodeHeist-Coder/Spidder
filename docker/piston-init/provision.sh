@@ -1,5 +1,5 @@
 #!/bin/sh
-# Provision the Piston sandbox with the language runtimes CombatX supports.
+# Provision the Piston sandbox with the language runtimes Spidder supports.
 #
 # Runs as a one-shot init container: wait for Piston's API, install any runtime
 # that isn't already present, verify, then exit 0. Installing a runtime that is

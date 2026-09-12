@@ -1,5 +1,5 @@
 ###############################################################################
-# CombatX — production stack.
+# Spidder — production stack.
 #
 #   docker compose up --build
 #
@@ -14,11 +14,11 @@
 # without a Python runtime.
 ###############################################################################
 
-name: combatx
+name: spidder
 
 x-app-env: &app-env
   NODE_ENV: production
-  DATABASE_URL: postgresql://postgres:postgres@postgres:5432/combateone?schema=public
+  DATABASE_URL: postgresql://postgres:postgres@postgres:5432/spidder?schema=public
   REDIS_URL: redis://redis:6379
   PISTON_URL: http://piston:2000/api/v2
   JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-in-production}
@@ -32,7 +32,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: combateone
+      POSTGRES_DB: spidder
     # Bound to loopback, and overridable: a Postgres already running on the
     # host would otherwise make `compose up` fail with "address already in use".
     ports:
@@ -40,7 +40,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d combateone"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d spidder"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -105,7 +105,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/combateone?schema=public
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/spidder?schema=public
     restart: "no"
 
   # --- application services -------------------------------------------------
@@ -123,6 +123,10 @@ services:
       <<: *app-env
       HTTP_API_HOST: 0.0.0.0
       HTTP_API_PORT: 4001
+      # Server-to-server, for the admin dashboard's live connection counts.
+      # The code defaults to localhost:4002, which in a container is the
+      # container itself — so it must be named explicitly here.
+      WS_SERVER_INTERNAL_URL: http://ws-server:4002
     ports:
       - "4001:4001"
 

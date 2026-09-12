@@ -33,8 +33,8 @@ const fingerPaint = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "CombatX Admin",
-  description: "Operations console for CombatX.",
+  title: "Spidder Admin",
+  description: "Operations console for Spidder.",
   // The console must never be indexed, even if it is ever exposed publicly.
   robots: { index: false, follow: false, nocache: true },
 };

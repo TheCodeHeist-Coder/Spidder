@@ -1,19 +1,19 @@
 # User Guide
 
-**CombatX** — real-time competitive coding battles  
+**Spidder** — real-time competitive coding battles  
 Document 3 of 3 · [Technical Approach](01-technical-approach.md) · [Why/What/How](02-why-what-how.md)
 
 ---
 
-## Part 1 — Running CombatX
+## Part 1 — Running Spidder
 
 ### Start it
 
 You need **Docker** and nothing else.
 
 ```bash
-git clone <repo-url> combatX
-cd combatX
+git clone <repo-url> spidder
+cd spidder
 docker compose up --build
 ```
 

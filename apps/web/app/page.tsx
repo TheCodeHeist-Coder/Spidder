@@ -29,6 +29,9 @@ export default function HomePage() {
     <AppShell
       session={session}
       profile={profile}
+      // The landing page is the one place the footer belongs: a visitor here
+      // may still be looking for the company, not the product.
+      footer
       right={
         session ? (
           <button

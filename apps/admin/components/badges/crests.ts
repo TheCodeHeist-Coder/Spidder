@@ -8,7 +8,7 @@
  * WHY PIXEL GRIDS AND NOT ILLUSTRATED SVG PATHS
  * ---------------------------------------------
  * The avatars a player picks are already pixel art, so path-drawn badges would
- * read as imported clip-art sitting next to CombatX's own characters. Matching
+ * read as imported clip-art sitting next to Spidder's own characters. Matching
  * the grid keeps one visual language across the whole product. It also means a
  * badge is data, not markup: redrawing one is editing twelve strings, and no
  * component changes.

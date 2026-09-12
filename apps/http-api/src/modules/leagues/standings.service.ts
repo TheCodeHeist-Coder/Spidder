@@ -2,7 +2,6 @@ import { prisma } from "@repo/db";
 import {
   buildLeagueTable,
   contestedPlaces,
-  hasAmbiguousCut,
   nextRoundFor,
   qualifyingTeams,
   seedPairings,

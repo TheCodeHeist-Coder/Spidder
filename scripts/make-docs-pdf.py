@@ -170,7 +170,7 @@ def main() -> int:
         tmp_md.write_text(merged, encoding="utf-8")
         try:
             pdf = convert(tmp_md, chrome, DOCS)
-            final = DOCS / "combatx-documentation.pdf"
+            final = DOCS / "spidder-documentation.pdf"
             pdf.replace(final)
             print(
                 f"  {'(all three)':<32} -> {final.name}  "

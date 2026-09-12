@@ -46,7 +46,7 @@ const fingerPaint = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "CombatX — real-time coding battles",
+  title: "Spidder — real-time coding battles",
   description:
     "Race an opponent to solve the same problem. First to pass every test wins.",
 };

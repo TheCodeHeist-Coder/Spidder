@@ -109,12 +109,22 @@ export function Badge({
   locked = false,
   size = "md",
   tier,
+  bare,
 }: {
   badge: BadgeView;
   locked?: boolean;
   size?: "sm" | "md" | "lg";
   /** Optional multiplier bubble for a repeatable achievement. */
   tier?: number;
+  /**
+   * Exact pixel size with no figure padding, for dense rows.
+   *
+   * The named sizes wrap each medal in a figure padded to `size + 16`, which
+   * is right on a profile shelf but leaves dead space either side in a table
+   * column — enough that rows with different badge counts stop lining up.
+   * Passing `bare` renders the medal alone at exactly that width.
+   */
+  bare?: number;
 }) {
   const honour = isHonour(badge.category);
   const r = rarity(badge.rarity);
@@ -122,7 +132,9 @@ export function Badge({
   const fg = honour ? HONOUR_FG : r.fg;
   // A wreathed medal needs a little more room to read, and the ornate viewBox
   // scales its contents down to make space for the laurel.
-  const px = (size === "lg" ? 80 : size === "sm" ? 34 : 64) * (honour ? 1.18 : 1);
+  const px =
+    bare ??
+    (size === "lg" ? 80 : size === "sm" ? 34 : 64) * (honour ? 1.18 : 1);
 
   const description = locked
     ? `${badge.label} — ${badge.description} (not yet earned)`
@@ -134,7 +146,7 @@ export function Badge({
     <figure
       title={description}
       className="m-0 flex flex-col items-center gap-1.5"
-      style={{ width: px + 16 }}
+      style={{ width: bare ? px : px + 16 }}
     >
       {CRESTS[badge.key] ? (
         <BadgeMedal
@@ -165,7 +177,7 @@ export function Badge({
         </span>
       )}
 
-      {size !== "sm" && (
+      {size !== "sm" && !bare && (
         <figcaption
           className="text-center font-mono leading-tight"
           style={{

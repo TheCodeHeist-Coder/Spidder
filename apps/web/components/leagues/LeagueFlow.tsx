@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import Link from "next/link";
 import { leagueProgress, teamPath, type BracketFixture } from "@repo/game";
 import type {
   LeagueDetailResponse,
