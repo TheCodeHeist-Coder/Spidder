@@ -85,6 +85,14 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # @repo/game imports @repo/protocol, whose types resolve to its dist/.
+      # A fresh checkout has no dist/, so `tsc` inside the test script fails
+      # with "Cannot find module '@repo/protocol'" — a missing build step that
+      # reads like a broken import. Locally it passes only because dist/ is
+      # left over from a previous build.
+      - name: Build workspace dependencies
+        run: pnpm --filter @repo/game^... build
+
       # @repo/game is the only package with tests, and it is deliberately
       # database-free so it needs no services here. Called by filter rather than
       # `turbo run test` because turbo.json defines no `test` task — adding one

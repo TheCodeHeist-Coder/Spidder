@@ -94,7 +94,7 @@ test("harder problems pay more for identical play", () => {
 
   assert.ok(medium.xp > easy.xp);
   assert.ok(hard.xp > medium.xp);
-  assert.equal(hard.xp, Math.round(easy.baseXp * DIFFICULTY_WEIGHT.HARD));
+  assert.equal(hard.xp, Math.round(easy.baseXp * DIFFICULTY_WEIGHT["HARD"]!));
 });
 
 test("the difficulty weight is reported for the breakdown", () => {
