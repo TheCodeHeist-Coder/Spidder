@@ -1,0 +1,256 @@
+###############################################################################
+# Spidder — production deployment on a VPS.
+#
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# WHICH COMPOSE FILE IS WHICH
+# ---------------------------
+#   docker-compose.dev.yml   infra only, for `pnpm dev` against local sources
+#   docker-compose.yml       the whole stack in containers, one command, for
+#                            trying the app on a laptop
+#   docker-compose.prod.yml  THIS FILE — a real deployment on a real server
+#
+# DIFFERENT FROM docker-compose.yml IN ONE IMPORTANT WAY
+# ------------------------------------------------------
+# Postgres and Redis are NOT containers here. They run on the VPS host, managed
+# by systemd, with their own backup and upgrade story. Only the application
+# services and the Piston sandbox are containerised.
+#
+# That means the app containers have to reach back out to the host. On Linux
+# that is not automatic: `host.docker.internal` resolves only because each
+# service below maps it to `host-gateway`. Without that mapping the containers
+# would resolve nothing and every database call would fail at startup.
+#
+# THE HOST MUST ALLOW IT
+# ----------------------
+# Two things are easy to get wrong and both fail the same way — a connection
+# that hangs then times out:
+#
+#   1. Postgres binds to localhost only by default. It must also listen on the
+#      docker bridge. In postgresql.conf:
+#          listen_addresses = 'localhost,172.17.0.1'
+#      and in pg_hba.conf, allow the bridge subnet:
+#          host  spidder  spidder  172.16.0.0/12  scram-sha-256
+#
+#   2. Redis likewise. In redis.conf:
+#          bind 127.0.0.1 172.17.0.1
+#          requirepass <a long random string>
+#      Leave `protected-mode yes`. A Redis reachable from the bridge with no
+#      password is a Redis reachable by anything that gets a shell in any
+#      container.
+#
+# See DEPLOYMENT.md for the full host setup, including the firewall rules
+# that keep 5432/6379 off the public internet.
+#
+# IMAGES
+# ------
+# Published to Docker Hub under the `codeheist` account, as
+# `codeheist/spidder-<service>`. The account is written out literally rather
+# than parameterised — it is a fact about this project, not a knob.
+#
+# IMAGE_TAG is the one part that varies, and defaults to `latest` so a bare
+# `docker compose -f docker-compose.prod.yml up -d` works. The deploy workflow
+# sets it to the commit SHA, pinning a rollout to one exact build — which is
+# what makes a rollback a tag change rather than a revert and rebuild.
+#
+# Forking? Change `codeheist` here to your own Docker Hub account, and set
+# DOCKERHUB_USERNAME to match. Leave it and your server will keep pulling this
+# project's images while your CI pushes to yours: a deploy that reports success
+# and changes nothing.
+#
+# SECRETS
+# -------
+# Everything below comes from a `.env` file sitting next to this one. There are
+# deliberately NO fallback defaults for the credentials: a missing DATABASE_URL
+# should stop the deploy, not silently start a stack pointed at a database that
+# does not exist.
+###############################################################################
+
+name: spidder
+
+# Shared by every application service.
+#
+# `?err` on a value means "fail the deploy if this is unset". It is reserved
+# for things that are either secret or environment-specific — exactly the
+# values that must never fall back to a development default in production.
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required — point it at the host Postgres}
+  REDIS_URL: ${REDIS_URL:?REDIS_URL is required — point it at the host Redis}
+  PISTON_URL: http://piston:2000/api/v2
+  JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required — generate one with `openssl rand -hex 32`}
+  CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required — e.g. https://spidder.example.com}
+
+# Lets a container resolve `host.docker.internal` to the VPS itself, which is
+# how it reaches the host-managed Postgres and Redis. Linux needs this spelled
+# out; Docker Desktop provides it implicitly, which is why this is a common
+# "works on my machine" trap.
+x-host-access: &host-access
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+# Keeps one container's runaway logs from filling the VPS disk and taking the
+# whole stack down with it.
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  # --- sandbox --------------------------------------------------------------
+  # Still a container: Piston needs privileged mode to build its own isolation
+  # cgroups, and running that directly on the host would be worse, not better.
+  #
+  # NOT published to the host. Nothing outside this compose network has any
+  # business reaching an API whose whole job is running untrusted code.
+  piston:
+    image: ghcr.io/engineer-man/piston
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - pistondata:/piston
+    <<: *logging
+    healthcheck:
+      # This image ships Node 15 — no global fetch, no curl, no wget. http.get
+      # is the only probe available to us here.
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:2000/api/v2/runtimes',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # --- one-shot initialisers ------------------------------------------------
+  # Installs the Python runtime into Piston. Idempotent; exits 0 when ready.
+  piston-init:
+    image: alpine:3.20
+    depends_on:
+      piston:
+        condition: service_healthy
+    environment:
+      PISTON_URL: http://piston:2000/api/v2
+    volumes:
+      - ./docker/piston-init/provision.sh:/provision.sh:ro
+    entrypoint: ["/bin/sh", "/provision.sh"]
+    restart: "no"
+    <<: *logging
+
+  # Applies the Prisma schema and seeds problems against the HOST Postgres,
+  # then exits. Idempotent (`db push` converges, the seed upserts), so it is
+  # safe to run on every deploy — which is what makes a schema change ship
+  # automatically with the code that needs it.
+  db-init:
+    image: codeheist/spidder-db-init:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: docker/db-init/Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+    restart: "no"
+    <<: [*host-access, *logging]
+
+  # --- application services -------------------------------------------------
+  http-api:
+    image: codeheist/spidder-http-api:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: apps/http-api/Dockerfile.prod
+    restart: unless-stopped
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *app-env
+      HTTP_API_HOST: 0.0.0.0
+      HTTP_API_PORT: 4001
+      # Where http-api reaches ws-server for the admin dashboard's live
+      # connection counts. Server-to-server over the compose network, never
+      # through the proxy — that endpoint is unauthenticated by design and
+      # must not be publicly reachable.
+      #
+      # Must be set explicitly: the code defaults to `http://localhost:4002`,
+      # which inside this container is the container itself. Left unset, the
+      # admin stats panel fails silently rather than loudly.
+      WS_SERVER_INTERNAL_URL: http://ws-server:4002
+      # Seeds the first admin account on boot when absent. Optional: leave
+      # unset and create the admin by hand instead.
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-}
+      SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD:-}
+      SUPER_ADMIN_USERNAME: ${SUPER_ADMIN_USERNAME:-}
+    # Published to LOOPBACK ONLY. The reverse proxy on the host terminates TLS
+    # and forwards to these; binding 0.0.0.0 here would expose plaintext HTTP
+    # on the public interface and quietly bypass the proxy.
+    ports:
+      - "127.0.0.1:${HTTP_API_PORT:-4001}:4001"
+    <<: [*host-access, *logging]
+
+  ws-server:
+    image: codeheist/spidder-ws-server:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: apps/ws-server/Dockerfile.prod
+    restart: unless-stopped
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *app-env
+      WS_SERVER_HOST: 0.0.0.0
+      WS_SERVER_PORT: 4002
+    ports:
+      - "127.0.0.1:${WS_SERVER_PORT:-4002}:4002"
+    <<: [*host-access, *logging]
+
+  judge-worker:
+    image: codeheist/spidder-judge-worker:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: apps/judge-worker/Dockerfile.prod
+    restart: unless-stopped
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      piston-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *app-env
+      JUDGE_CONCURRENCY: ${JUDGE_CONCURRENCY:-4}
+    # No published port: it is a queue consumer, not a server.
+    <<: [*host-access, *logging]
+
+  web:
+    image: codeheist/spidder-web:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.prod
+      args:
+        # Inlined into the CLIENT bundle at build time, so these are the URLs a
+        # BROWSER uses — public https:// origins, never compose service names.
+        # Changing them requires a rebuild, not a restart; that is why CI passes
+        # them as build args rather than runtime env.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required — the public API origin}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:?NEXT_PUBLIC_WS_URL is required — the public WebSocket origin}
+    restart: unless-stopped
+    depends_on:
+      http-api:
+        condition: service_healthy
+      ws-server:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3001}:3001"
+    <<: *logging
+
+volumes:
+  # Piston's installed language runtimes. Survives `down`; losing it only means
+  # piston-init downloads Python again on the next boot.
+  pistondata:

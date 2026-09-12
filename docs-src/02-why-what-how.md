@@ -1,6 +1,6 @@
 # Why, What & How
 
-**CombatX** — real-time competitive coding battles  
+**Spidder** — real-time competitive coding battles  
 Document 2 of 3 · [Technical Approach](01-technical-approach.md) · [User Guide](03-user-guide.md)
 
 ---
@@ -66,7 +66,7 @@ all provisioned automatically on first boot.
 No ratings. No ladders. No matchmaking against strangers. No streak mechanics
 pulling you back tomorrow.
 
-CombatX assumes **you already know who you're playing.** You're in a room
+Spidder assumes **you already know who you're playing.** You're in a room
 together, physically or on a call. It's a tool for a group that has gathered —
 not a platform trying to keep you online.
 

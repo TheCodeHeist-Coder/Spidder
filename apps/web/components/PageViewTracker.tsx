@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { API_URL } from "../lib/config";
 
-const VISITOR_KEY = "combatx.visitor";
+const VISITOR_KEY = "spidder.visitor";
 
 /**
  * A stable per-browser id, generated on first visit.

@@ -162,7 +162,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
  * The console's mark.
  *
  * Flat --color-accent, which is a light grey in the console and the player
- * app's orange under .auth-theme — so the same component reads as CombatX on
+ * app's orange under .auth-theme — so the same component reads as Spidder on
  * the sign-in door and as neutral chrome everywhere behind it.
  */
 export function Wordmark({ small = false }: { small?: boolean }) {
@@ -175,7 +175,7 @@ export function Wordmark({ small = false }: { small?: boolean }) {
           color: "var(--color-accent)",
         }}
       >
-        COMBATX
+        SPIDDER
       </span>
       <span
         className="label"

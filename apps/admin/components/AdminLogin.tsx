@@ -12,7 +12,7 @@ import { Wordmark } from "./AdminShell";
  *
  * A 50/50 split above lg: artwork left, form right — the same shape as the
  * player app's sign-in, and wearing the same orange and display faces via
- * `.auth-theme`. This is the door to CombatX, so it should look like CombatX;
+ * `.auth-theme`. This is the door to Spidder, so it should look like Spidder;
  * everything past it is cyan so nobody confuses the console for the site.
  *
  * Below lg the artwork column drops away entirely rather than stacking above

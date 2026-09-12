@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------------
- * CombatX admin console.
+ * Spidder admin console.
  *
  * Black and grey, deliberately. This is a tool someone stares at for an hour,
  * so the surface stays out of the way: no glow, no coloured washes, no
@@ -396,7 +396,7 @@
    *
    * The console proper is cyan so an operator can never mistake it for the
    * public site. The SIGN-IN screen is the one place that should feel like
-   * CombatX — it is the door to the product, not the machinery behind it — so
+   * Spidder — it is the door to the product, not the machinery behind it — so
    * it borrows the player app's orange, its display faces, and its wordmark
    * treatment. Everything here is scoped under .auth-theme; nothing leaks into
    * the dashboard.

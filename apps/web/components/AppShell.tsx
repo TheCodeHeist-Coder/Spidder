@@ -9,7 +9,6 @@ import { UserAvatar } from "./identity/UserIdentity";
 import { NotificationBell } from "./NotificationBell";
 import type { Session } from "../lib/session";
 import {
-  IconMapPin,
   IconGitHub,
   IconX,
   IconLinkedIn,
@@ -24,6 +23,9 @@ import {
  * The persistent application chrome: a top command bar, with screens rendered
  * beneath it. Every destination is reachable from that one bar.
  */
+
+/** The public source. Named once so the bar and the footer cannot drift. */
+const REPO_URL = "https://github.com/TheCodeHeist-Coder/Spidder";
 
 interface NavItem {
   label: string;
@@ -44,18 +46,32 @@ export function AppShell({
   profile,
   children,
   right,
+  footer = false,
 }: {
   session?: Session | null;
   /** Live progression, when the caller has fetched it. */
   profile?: ProfileResponse | null;
   children: ReactNode;
   right?: ReactNode;
+  /**
+   * Whether to show the marketing footer. Off by default.
+   *
+   * The footer is site-level furniture — company links, socials, contact — and
+   * it belongs on the landing page, where a visitor is still deciding. Every
+   * other screen is a working surface: an auth form, an arena, a league
+   * dashboard. There a wall of links is noise between the user and the task,
+   * and on the short ones it is most of the page.
+   *
+   * Defaulting to off means a new screen inherits the quiet version and has to
+   * ask for the footer, rather than acquiring it silently.
+   */
+  footer?: boolean;
 }) {
   return (
     <div className="flex min-h-dvh flex-col">
       <CommandBar session={session} profile={profile} right={right} />
       <main className="min-w-0 flex-1">{children}</main>
-      <SiteFooter />
+      {footer && <SiteFooter />}
     </div>
   );
 }
@@ -98,6 +114,35 @@ function CommandBar({
 
         <div className="ml-auto flex items-center gap-2.5">
           {right}
+          {/*
+            The source, for anyone who wants to contribute.
+
+            It sits in the bar rather than only in the footer because the
+            footer now appears on the landing page alone, and a contributor is
+            most likely to be deep in the product — mid-match or browsing
+            problems — when the thought strikes.
+
+            Icon-only: it is an invitation, not a primary action, and it must
+            not compete with Log in / Sign up. The accessible name and the
+            tooltip carry the meaning that the glyph cannot.
+          */}
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noreferrer noopener"
+            aria-label="Contribute on GitHub"
+            title="Contribute on GitHub"
+            className="hidden text-[1.05rem] transition-colors sm:inline-flex"
+            style={{ color: "var(--color-ink-faint)" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "var(--color-ink)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "var(--color-ink-faint)";
+            }}
+          >
+            <IconGitHub />
+          </a>
           {/* Guests have nothing to be notified about — no league, no team. */}
           {session && !session.isGuest && (
             <NotificationBell session={session} />
@@ -165,6 +210,21 @@ function CommandBar({
             </Link>
           ))}
 
+          {/* Same reasoning as the auth buttons below: the bar's GitHub icon
+              is sm-and-up, so without this a phone has no route to the source
+              now that the footer is landing-page only. */}
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noreferrer noopener"
+            onClick={() => setOpen(false)}
+            className="nav-link flex items-center gap-2.5 rounded-[6px] px-3 py-2.5 text-[0.9rem]"
+            style={{ color: "var(--color-ink-dim)" }}
+          >
+            <IconGitHub />
+            Contribute on GitHub
+          </a>
+
           {/* The header's own auth buttons are sm-and-up only, so repeat them
               here or a signed-out phone visitor has no way to an account. */}
           {!session && (
@@ -202,13 +262,45 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
       style={{ color: active ? "var(--color-accent)" : "var(--color-ink-dim)" }}
     >
       {item.label}
-      {active && (
-        <span
-          className="absolute inset-x-2.5 -bottom-[13px] h-0.5"
-          style={{ background: "var(--color-primary)" }}
-        />
-      )}
+      {active && <Squiggle />}
     </Link>
+  );
+}
+
+/**
+ * The hand-drawn underline beneath the active nav item.
+ *
+ * An SVG rather than `text-decoration: wavy`: that keeps the wave glued to the
+ * text baseline at a size the browser picks, differs between engines, and
+ * cannot be given the slight irregularity that makes a mark read as drawn
+ * rather than generated. Here the curve is explicit.
+ *
+ * `preserveAspectRatio="none"` lets one path stretch across labels as short as
+ * "Intel" and as long as "Rankings" while keeping the stroke an even weight,
+ * because the stroke is scaled by `vector-effect` and not by the viewBox.
+ *
+ * Eight short humps rather than four long ones: at nav size a slow wave reads
+ * as a wobbly line, while a tight one reads as deliberate. `Q` sets the first
+ * hump and the `T` chain mirrors it, so the period stays even all the way
+ * across however far the path is stretched.
+ */
+function Squiggle() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-1 -bottom-[5px] h-1.5 w-[calc(100%-0.5rem)] overflow-visible"
+      viewBox="0 0 100 6"
+      preserveAspectRatio="none"
+      fill="none"
+    >
+      <path
+        d="M1 3.4 Q 7 0.8, 13 3.4 T 25 3.4 T 37 3.4 T 49 3.4 T 61 3.4 T 73 3.4 T 85 3.4 T 97 3.4"
+        stroke="var(--color-primary)"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
   );
 }
 
@@ -287,7 +379,7 @@ function SiteFooter() {
                 className="font-mono text-[1.25rem] font-black uppercase tracking-[0.12em]"
                 style={{ color: "#f5f7fb" }}
               >
-                COMBATX
+                SPIDDER
               </span>
             </div>
 
@@ -307,28 +399,13 @@ function SiteFooter() {
               Built for players, driven by community.
             </p>
 
-            {/* small orange line */}
-            <div
-              className="mt-4 h-px w-20"
-              style={{ background: "rgba(255,138,61,0.7)" }}
-            />
-
-            <div
-              className="mt-3 flex items-center gap-2 text-[0.78rem]"
-              style={{ color: "rgba(255,255,255,0.65)" }}
-            >
-              <span style={{ color: "#ff8a3d" }}>
-                <IconMapPin/>
-              </span>
-
-              <span>Knit Sultanpur, UP, India</span>
-            </div>
+        
 
             {/* SOCIAL BUTTONS */}
             <div className="mt-4 flex items-center gap-3">
 
               <a
-                href="https://github.com"
+                href={REPO_URL}
                 target="_blank"
                 rel="noreferrer"
                 aria-label="GitHub"
@@ -343,7 +420,7 @@ function SiteFooter() {
               </a>
 
               <a
-                href="https://x.com"
+                href="https://x.com/CodeHeistCoder"
                 target="_blank"
                 rel="noreferrer"
                 aria-label="Twitter"
@@ -358,7 +435,7 @@ function SiteFooter() {
               </a>
 
               <a
-                href="https://linkedin.com"
+                href="https://www.linkedin.com/in/raj-kumar-54225532a/"
                 target="_blank"
                 rel="noreferrer"
                 aria-label="LinkedIn"
@@ -373,7 +450,7 @@ function SiteFooter() {
               </a>
 
               <a
-                href="mailto:raj@combatx.dev"
+                href="mailto:thecodeheist01@gmail.com"
                 aria-label="Email"
                 className="flex h-9 w-9 items-center justify-center rounded-full transition-all duration-200 hover:-translate-y-1"
                 style={{
@@ -578,7 +655,7 @@ function SiteFooter() {
                   <IconPhone />
                 </span>
 
-                <span>+91 98765 43210</span>
+                <span>+91 8400622737</span>
               </div>
 
 
@@ -590,7 +667,7 @@ function SiteFooter() {
                   <IconMail />
                 </span>
 
-                <span>raj@combatx.dev</span>
+                <span>thecodeheist01@gmail.com</span>
               </div>
 
             </div>
@@ -607,9 +684,9 @@ function SiteFooter() {
         >
 
           <div>
-            © 2024{" "}
+            © 2026{" "}
             <span style={{ color: "#ff8a3d" }}>
-              COMBATX
+              SPIDDER
             </span>
             . All rights reserved.
           </div>

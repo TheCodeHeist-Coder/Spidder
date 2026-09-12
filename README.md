@@ -1,4 +1,4 @@
-#  Loading.. .. ..
+# Spidder
 
 Real-time competitive coding battles.
 
@@ -16,8 +16,8 @@ only a passed-count — and the hidden tests never reach a client.
 You need **Docker** and nothing else.
 
 ```bash
-git clone <repo-url> combatX
-cd combatX
+git clone https://github.com/TheCodeHeist-Coder/Spidder.git spidder
+cd spidder
 docker compose up --build
 ```
 
@@ -44,12 +44,12 @@ Full instructions, including running without Docker, are in **[SETUP.md](SETUP.m
 | **[Why, What & How](docs/02-why-what-how.pdf)** (PDF) | The problem, the audience, and why the design follows |
 | **[User Guide](docs/03-user-guide.pdf)** (PDF) | Running it, hosting a battle, playing, troubleshooting |
 
-Or read **[all three combined](docs/combatx-documentation.pdf)**. Sources live in
+Or read **[all three combined](docs/spidder-documentation.pdf)**. Sources live in
 [`docs-src/`](docs-src/); regenerate with `python3 scripts/make-docs-pdf.py --combined`.
 
 ---
 
-## Why CombatX exists
+## Why Spidder exists
 
 ### The problem
 
@@ -80,8 +80,10 @@ a bracket, a warm-up round, or a quick grudge match without scheduling around
 someone else's contest calendar.
 
 That audience drives the whole design. A club can't ask forty people to
-register accounts before a session starts, so play is **guest-only** — pick a
-name, get a room code, you're in. And an organizer shouldn't need a DevOps
+register accounts before a session starts, so a room-code battle needs **no
+account at all** — pick a name, get a code, you're in. Signing up is optional,
+and only buys the things that genuinely require an identity that persists:
+a rating, a league team, badges. And an organizer shouldn't need a DevOps
 afternoon to host it, so the entire stack is **one command**.
 
 ### Why it's built this way
@@ -122,12 +124,23 @@ socket frame) and `packages/game` are compiled into both the frontend and the
 backend. A protocol change that breaks a client is a type error at build time,
 not a mystery bug in the middle of someone's tournament.
 
-### Non-goals
+### What it deliberately isn't
 
-No ratings, no ladders, no matchmaking against strangers. CombatX assumes you
-already know who you're playing — you're in a room together, physically or on a
-call. It's a tool for a group that has gathered, not a platform trying to keep
-you online.
+**Not a scheduled-contest platform.** Nothing here runs on a calendar. A match
+starts when two people want one, not at 20:00 UTC on a Saturday.
+
+**Not a place to grind alone.** Every mode needs an opponent. There is no
+single-player practice track, because the thing being trained is performing
+against someone, not correctness in isolation.
+
+**Not built to keep you online.** No streaks to maintain, no daily quests, no
+notifications pulling you back. Ranked exists so a match can be fair between
+strangers — not to give anyone a number to defend.
+
+The ladder came later than the room-code battles it sits beside, and the two
+answer different needs: a club wants a bracket on a Thursday, a solo player
+wants a fair opponent right now. Both stay guest-friendly, and rating only
+moves in server-paired matches so a private room can never feed it.
 
 ---
 
@@ -144,8 +157,10 @@ A battle moves through three phases, all driven over a single WebSocket:
 3. **Results** — first side to pass every test wins immediately (`ALL_PASSED`).
    If the timer expires first, the highest passed-count wins (`TIMEOUT`).
 
-Play is guest-only: pick a display name, get a JWT, share a room code. No
-accounts, no passwords.
+Room-code battles need no account: pick a display name, get a guest JWT, share
+the code. Registering is optional and unlocks what needs a lasting identity —
+ranked matchmaking, leagues, and progression. Guests are barred from ranked on
+purpose: a rating that vanishes with a token is one nobody can be held to.
 
 Modes run from 1v1 up to 4v4. **1v1 ships today**; the larger team modes are
 modelled end-to-end and gated in the UI.
@@ -270,9 +285,10 @@ because it arrived over a channel that was trusted a moment ago.
 ## Project structure
 
 ```
-combatX/
+spidder/
 ├── apps/
 │   ├── web/            Next.js frontend
+│   ├── admin/          Next.js operations console (not yet containerised)
 │   ├── http-api/       Express REST API
 │   ├── ws-server/      authoritative WebSocket game server
 │   └── judge-worker/   BullMQ consumer + Piston client
@@ -285,9 +301,19 @@ combatX/
 ├── docker/
 │   ├── db-init/        migrate + seed init container
 │   └── piston-init/    runtime provisioner
-├── docker-compose.yml       production stack
-└── docker-compose.dev.yml   hot-reload dev stack
+├── .github/workflows/
+│   ├── ci.yml              lint · typecheck · test · build
+│   └── deploy.yml          build images → Docker Hub → roll out on the VPS
+├── docker-compose.yml       full stack in containers (local)
+├── docker-compose.dev.yml   hot-reload dev stack
+└── docker-compose.prod.yml  VPS deploy — host Postgres/Redis
 ```
+
+### Deploying
+
+See [DEPLOYMENT.md](DEPLOYMENT.md). Production runs Postgres and Redis on the
+host and only the app services in Docker, so the compose file and the host
+setup have to agree — that guide covers both.
 
 ### Data model
 
@@ -301,6 +327,7 @@ combatX/
 | Service   | URL                         |
 | --------- | --------------------------- |
 | Web       | <http://localhost:3001>     |
+| Admin     | <http://localhost:3002>     |
 | HTTP API  | <http://localhost:4001>     |
 | WebSocket | `ws://localhost:4002/ws`    |
 | Piston    | <http://localhost:2000>     |
@@ -315,7 +342,7 @@ remap — e.g. `REDIS_PORT=6380`. Details in [SETUP.md](SETUP.md).
 ## Commands
 
 ```bash
-pnpm dev            # run all four apps with hot reload
+pnpm dev            # run all five apps with hot reload
 pnpm build          # production build, all workspaces
 pnpm check-types    # TypeScript
 pnpm lint           # ESLint
@@ -338,8 +365,8 @@ reload) and `Dockerfile.prod` (multi-stage, pruned, non-root).
 
 The production images use `turbo prune` so an unrelated app's change doesn't
 bust the dependency-install cache, then install production-only dependencies
-into a slim runtime layer. The difference is substantial — `web` is **331MB**
-in prod versus 1.19GB in dev.
+into a slim runtime layer. The difference is substantial — the `web` prod image
+is roughly a quarter the size of its dev counterpart.
 
 Two init containers make the one-command start possible: **`db-init`** applies
 the schema and seeds problems, **`piston-init`** installs the language runtime.
@@ -349,8 +376,22 @@ Both are idempotent and gated behind healthchecks.
 
 ## Status
 
-1v1 battles work end to end — guest auth, lobby, live scoring, sandboxed
-judging, instant-win and timeout outcomes, persisted results.
+**Working end to end:**
 
-Team modes 2v2 through 4v4 are modelled across the schema, protocol, and rules,
-but gated in the UI pending a lobby flow for larger rosters.
+- **1v1 battles** — guest auth, lobby, live scoring, sandboxed judging,
+  instant-win and timeout outcomes, persisted results
+- **Ranked matchmaking** — Glicko-2 rating, server-paired opponents only, so
+  the ladder cannot be farmed from a private room
+- **Leagues** — create, join by code, team formation, host-drawn fixtures,
+  qualification rules, brackets and a flow preview
+- **Progression** — XP, ranks, and 29 badges across milestone, skill and
+  contribution categories
+- **Community problems** — players submit problems, admins approve or reject
+  with a reason, approved ones enter rotation
+
+**Not yet:**
+
+- Team modes 2v2–4v4 are modelled across the schema, protocol and rules, but
+  gated in the UI pending a lobby flow for larger rosters
+- `apps/admin` has no production Dockerfile, so the operations console runs
+  only in development. Its API lives in `http-api` and is deployed

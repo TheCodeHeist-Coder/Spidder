@@ -30,7 +30,7 @@ export interface Session {
   imageUrl: string | null;
 }
 
-const KEY = "combatx.session";
+const KEY = "spidder.session";
 
 export function loadSession(): Session | null {
   if (typeof window === "undefined") return null;

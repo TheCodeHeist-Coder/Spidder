@@ -1,6 +1,6 @@
 # Setup
 
-Two ways to run CombatX:
+Two ways to run Spidder:
 
 - **[Docker](#option-a--docker-recommended)** — one command, nothing to install. Best for just running it.
 - **[Local](#option-b--local-no-docker)** — run the apps on your host with hot reload. Best for day-to-day development.
@@ -17,8 +17,8 @@ no pnpm, no Postgres.
 ### Run it
 
 ```bash
-git clone <repo-url> combatX
-cd combatX
+git clone https://github.com/TheCodeHeist-Coder/Spidder.git spidder
+cd spidder
 docker compose up --build
 ```
 
@@ -89,8 +89,8 @@ applies to `POSTGRES_PORT` and `PISTON_PORT`.
 ### 1. Install
 
 ```bash
-git clone <repo-url> combatX
-cd combatX
+git clone https://github.com/TheCodeHeist-Coder/Spidder.git spidder
+cd spidder
 corepack enable
 pnpm install
 ```
@@ -112,7 +112,7 @@ cp packages/db/.env.example packages/db/.env
 | `packages/db/.env`   | Prisma CLI (migrate, seed, studio) |
 
 The defaults assume Postgres on `localhost:5432` with user/password
-`postgres`/`postgres` and a database named `combateone`. Adjust `DATABASE_URL`
+`postgres`/`postgres` and a database named `spidder`. Adjust `DATABASE_URL`
 in **both** `.env` and `packages/db/.env` if yours differs — they must match.
 
 Set `JWT_SECRET` to any long random string for local work.
@@ -122,7 +122,7 @@ Set `JWT_SECRET` to any long random string for local work.
 Create the database, then apply the schema and seed the problems:
 
 ```bash
-createdb combateone
+createdb spidder
 
 pnpm --filter @repo/db db:push     # apply the schema
 pnpm --filter @repo/db db:seed     # insert the problems
@@ -168,7 +168,8 @@ installed by default.
 pnpm dev
 ```
 
-This runs all four apps together. Open **<http://localhost:3001>**.
+This runs all five apps together. Open **<http://localhost:3001>** for the
+site, or **<http://localhost:3002>** for the admin console.
 
 To run just one:
 

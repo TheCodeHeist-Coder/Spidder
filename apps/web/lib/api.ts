@@ -71,7 +71,7 @@ async function request<T>(
     });
   } catch {
     throw new ApiCallError(
-      "Can't reach the server. Is the API running?",
+      "Server is Down or unreachable. Check your network connection and try again.",
       "NETWORK",
       0,
     );

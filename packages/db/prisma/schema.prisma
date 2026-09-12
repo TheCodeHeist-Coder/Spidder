@@ -1,4 +1,4 @@
-// CombateOne data model. Postgres + Prisma.
+// Spidder data model. Postgres + Prisma.
 // Ephemeral state (live snapshot, presence, rate limits, judge queue) lives in
 // Redis, NOT here. Postgres is the durable record of users, problems, battles,
 // submissions, and results.

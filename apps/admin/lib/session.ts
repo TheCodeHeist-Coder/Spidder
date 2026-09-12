@@ -16,7 +16,7 @@ export interface AdminSession {
   email: string;
 }
 
-const KEY = "combatx.admin";
+const KEY = "spidder.admin";
 
 export function loadAdminSession(): AdminSession | null {
   if (typeof window === "undefined") return null;

@@ -14,6 +14,7 @@ import { Centered, Spinner } from "../atoms";
 import { AppShell } from "../AppShell";
 import { getBattleResult, getBattleSolutions } from "../../lib/api";
 import { SolutionsPanel } from "./SolutionsPanel";
+import { RematchPanel } from "./RematchPanel";
 import { Markdown } from "../battle/Markdown";
 import { Samples } from "../battle/Samples";
 import { BadgeRow } from "../ranking/Badges";
@@ -215,7 +216,6 @@ export function Results({
             : "Battle drawn";
 
   const mine = standings.find((s) => s.side === mySide) ?? null;
-  const slowest = Math.max(...standings.map((s) => s.bestPassed), 1);
 
   return (
     <AppShell session={session} profile={profile}>
@@ -442,9 +442,22 @@ export function Results({
               mySide={mySide}
             />
 
+            {/*
+              Post-match actions.
+
+              The rematch offer needs a LIVE room: the negotiation is held in
+              the battle room and evicted once everyone disconnects. `snap` is
+              the honest test for that — it is null when this screen was
+              rebuilt from REST after a reload or on a shared link, and there
+              a rematch button could never resolve. Offering one that silently
+              does nothing is worse than not offering it.
+            */}
             <div className="flex flex-wrap items-center gap-3">
+              {snap && (
+                <RematchPanel conn={conn} myUserId={session.userId} />
+              )}
               <button
-                className="btn btn-primary"
+                className="btn btn-ghost"
                 onClick={() => router.push("/")}
               >
                 Back to lobby

@@ -184,7 +184,7 @@ export async function guestJoin(
  * email is unknown so both branches of login do the same work. See login().
  */
 const DUMMY_HASH = await hashPassword(
-  "combatx::timing-equalizer::not-a-password",
+  "spidder::timing-equalizer::not-a-password",
 );
 
 /**

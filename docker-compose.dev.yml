@@ -1,5 +1,5 @@
 ###############################################################################
-# CombatX — development stack (hot reload).
+# Spidder — development stack (hot reload).
 #
 #   docker compose -f docker-compose.dev.yml up --build
 #
@@ -14,11 +14,11 @@
 # the host's (possibly different-arch) one.
 ###############################################################################
 
-name: combatx-dev
+name: spidder-dev
 
 x-app-env: &app-env
   NODE_ENV: development
-  DATABASE_URL: postgresql://postgres:postgres@postgres:5432/combateone?schema=public
+  DATABASE_URL: postgresql://postgres:postgres@postgres:5432/spidder?schema=public
   REDIS_URL: redis://redis:6379
   PISTON_URL: http://piston:2000/api/v2
   JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-in-production}
@@ -32,7 +32,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: combateone
+      POSTGRES_DB: spidder
     # Bound to loopback, and overridable: a Postgres already running on the
     # host would otherwise make `compose up` fail with "address already in use".
     ports:
@@ -40,7 +40,7 @@ services:
     volumes:
       - pgdata-dev:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d combateone"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d spidder"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -99,7 +99,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/combateone?schema=public
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/spidder?schema=public
     restart: "no"
 
   # --- application services (hot reload) -----------------------------------

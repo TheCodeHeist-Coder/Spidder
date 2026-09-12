@@ -1,0 +1,342 @@
+###############################################################################
+# Deploy — build images, push to Docker Hub, roll them out on the VPS.
+#
+# WHY IMAGES ARE BUILT HERE AND NOT ON THE SERVER
+# -----------------------------------------------
+# A `docker compose build` on the VPS competes with the running stack for CPU
+# and memory, and a small droplet will OOM partway through a Next.js build and
+# leave the site down. Building on a runner and shipping finished images keeps
+# the deploy step to a pull and a restart — seconds, not minutes.
+#
+# It also makes rollback trivial: every deploy is tagged with its commit SHA,
+# so going back is re-running this workflow against an older tag rather than
+# reverting code and rebuilding.
+#
+# TRIGGERS
+#   push to main    build and deploy automatically
+#   manual dispatch deploy any ref, or build without deploying
+#
+# REQUIRED REPOSITORY SECRETS (Settings -> Secrets -> Actions)
+#   DOCKERHUB_USERNAME  your Docker Hub account — `codeheist`
+#   DOCKERHUB_TOKEN     an ACCESS TOKEN, not your password. Create one at
+#                       hub.docker.com -> Account Settings -> Personal access
+#                       tokens, scope "Read & Write". A token can be revoked
+#                       on its own; your password cannot without locking you
+#                       out of the account.
+#   VPS_HOST            server hostname or IP
+#   VPS_USER            ssh user (needs docker permission)
+#   VPS_SSH_KEY         private key, full PEM including header/footer lines
+#   VPS_APP_DIR         absolute path to the checkout on the server
+#   NEXT_PUBLIC_API_URL public API origin, e.g. https://api.spidder.example.com
+#   NEXT_PUBLIC_WS_URL  public WS origin,  e.g. wss://api.spidder.example.com/ws
+#
+# Optional:
+#   VPS_SSH_PORT        defaults to 22
+#
+# The five images are published as:
+#   codeheist/spidder-{http-api,ws-server,judge-worker,web,db-init}
+#
+# DOCKERHUB_USERNAME supplies that namespace when PUSHING here; the compose
+# file on the server writes `codeheist` literally when PULLING. Change one and
+# you must change the other, or CI pushes somewhere the server never looks.
+#
+# Docker Hub's free tier gives ONE private repository. Five private images
+# means a paid plan; otherwise create the five repos as public. They contain
+# only compiled application code — no secrets, since every credential is
+# injected at runtime from the server's .env. The one exception is the `web`
+# image: NEXT_PUBLIC_* are compiled into its browser bundle, and those are
+# public URLs by definition, visible in any visitor's devtools anyway.
+###############################################################################
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_deploy:
+        description: "Build and push images, but do not touch the server"
+        type: boolean
+        default: false
+
+# One deploy at a time. Without this, two merges a minute apart race each other
+# onto the same server and the one that finishes second wins — which may be the
+# older commit.
+#
+# `cancel-in-progress: false` matters here: cancelling mid-rollout could leave
+# the stack half-restarted. Better to queue and let the first finish.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  PNPM_VERSION: 10.19.0
+  NODE_VERSION: 22
+# No REGISTRY here. Docker Hub is the implicit default for both `docker login`
+# and an unprefixed `user/name` tag, so naming `docker.io` explicitly would be
+# an unused variable that looks load-bearing. The namespace — the part that
+# actually varies — comes from the DOCKERHUB_USERNAME secret.
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Re-verify before shipping.
+  #
+  # CI already ran on this commit, but that is not the same guarantee: a merge
+  # queue, a force-push, or a manual dispatch of an arbitrary ref can all reach
+  # this workflow with a commit CI never saw. This is cheap; a broken deploy is
+  # not.
+  # ---------------------------------------------------------------------------
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Generates the Prisma client, which the typecheck depends on.
+      - name: Generate Prisma client
+        run: pnpm --filter @repo/db build
+
+      - name: Typecheck
+        run: pnpm check-types
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Game logic tests
+        run: pnpm --filter @repo/game test
+
+  # ---------------------------------------------------------------------------
+  # Build the five images in parallel and push them to Docker Hub.
+  #
+  # A matrix rather than five copies of the same block: the only thing that
+  # differs is the Dockerfile path and the image name.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build ${{ matrix.name }}
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # Only the checkout needs a token. Docker Hub authenticates with its own
+      # access token secret, so `packages: write` — which exists solely to let
+      # GITHUB_TOKEN push to GHCR — would be an unused grant.
+      contents: read
+    strategy:
+      # One image failing should not cancel the other four — seeing every
+      # failure in one run beats fixing them one deploy at a time.
+      fail-fast: false
+      matrix:
+        include:
+          - name: http-api
+            dockerfile: apps/http-api/Dockerfile.prod
+          - name: ws-server
+            dockerfile: apps/ws-server/Dockerfile.prod
+          - name: judge-worker
+            dockerfile: apps/judge-worker/Dockerfile.prod
+          - name: web
+            dockerfile: apps/web/Dockerfile.prod
+          - name: db-init
+            dockerfile: docker/db-init/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      # Docker Hub namespaces images under the ACCOUNT name, which has nothing
+      # to do with the GitHub org — so it comes from the secret rather than
+      # being derived from `github.repository_owner`.
+      #
+      # Lowercased because Docker Hub stores account names lowercase while
+      # people type them capitalised. The local `docker tag` would accept the
+      # capitals happily; the push then targets a namespace that does not
+      # exist, and the error arrives as an access-denied deep into the run.
+      - name: Compute image namespace
+        id: img
+        run: |
+          ns=$(echo '${{ secrets.DOCKERHUB_USERNAME }}' | tr '[:upper:]' '[:lower:]')
+          if [ -z "$ns" ]; then
+            echo "DOCKERHUB_USERNAME is not set — add it under Settings → Secrets → Actions." >&2
+            exit 1
+          fi
+          echo "ns=$ns" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          # No `registry:` key — docker/login-action defaults to Docker Hub,
+          # and naming it explicitly is the documented way to get this wrong.
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          # The monorepo ROOT is the build context — every Dockerfile.prod runs
+          # `turbo prune` and needs the whole workspace to do it.
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          # Docker Hub images carry no registry host: `user/name` IS a Hub
+          # reference. Prefixing `docker.io/` would work but would make the
+          # server's `docker images` output disagree with the compose file.
+          tags: |
+            ${{ steps.img.outputs.ns }}/spidder-${{ matrix.name }}:${{ github.sha }}
+            ${{ steps.img.outputs.ns }}/spidder-${{ matrix.name }}:latest
+          # Layer cache in the registry, so a deploy that only changed one app
+          # reuses the pnpm install and build layers of the previous one.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          # NEXT_PUBLIC_* are inlined into the CLIENT bundle at build time, so
+          # the real public origins have to be present HERE. Passing them at
+          # runtime would leave the browser calling localhost in production.
+          # Harmless for the other four images, which ignore them.
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_WS_URL=${{ secrets.NEXT_PUBLIC_WS_URL }}
+
+  # ---------------------------------------------------------------------------
+  # Roll out on the VPS: pull the new images, recreate the containers.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to VPS
+    needs: build
+    if: ${{ github.event_name == 'push' || !inputs.skip_deploy }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # No `environment:` here. GitHub would create one on first use, but an
+    # environment earns its keep only once it carries something — a required
+    # reviewer, or its own secrets. To gate deploys behind manual approval,
+    # create an Environment named `production` (Settings → Environments), add
+    # yourself as a required reviewer, then add `environment: production` back
+    # on this job.
+    steps:
+      - name: Open an SSH session
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Trust the host key
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_PORT: ${{ secrets.VPS_SSH_PORT || '22' }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keyscan -p "$VPS_SSH_PORT" -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 600 ~/.ssh/known_hosts
+
+      # The rollout itself.
+      #
+      # `set -euo pipefail` inside the remote shell is what makes this safe: a
+      # failed pull must abort the script, not fall through to a `compose up`
+      # that silently restarts the OLD images and reports success.
+      - name: Pull and restart
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_PORT: ${{ secrets.VPS_SSH_PORT || '22' }}
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
+          IMAGE_TAG: ${{ github.sha }}
+          HUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          ssh -p "$VPS_SSH_PORT" "$VPS_USER@$VPS_HOST" \
+            IMAGE_TAG="$IMAGE_TAG" \
+            APP_DIR="$VPS_APP_DIR" \
+            HUB_USER="$HUB_USER" \
+            HUB_TOKEN="$HUB_TOKEN" \
+            'bash -euo pipefail -s' <<'REMOTE'
+          cd "$APP_DIR"
+
+          # Logging in even for public images is deliberate. Anonymous pulls
+          # from Docker Hub are rate-limited per IP, and a VPS sharing an
+          # address range with other pullers can hit that ceiling mid-deploy —
+          # the failure is a 429 on `compose pull`, which reads like an outage.
+          # An authenticated pull gets the account's own, far higher limit.
+          echo "::group::Authenticating to Docker Hub"
+          echo "$HUB_TOKEN" | docker login -u "$HUB_USER" --password-stdin
+          echo "::endgroup::"
+
+          # The compose file itself is read from the server's checkout, so keep
+          # it current. --ff-only refuses to deploy from a diverged working
+          # tree rather than silently merging on a production box.
+          echo "::group::Syncing deployment files"
+          git fetch --depth=1 origin main
+          git checkout main
+          git merge --ff-only origin/main
+          echo "::endgroup::"
+
+          # Substituted into docker-compose.prod.yml, pinning this rollout to
+          # the exact images built from this commit. The Docker Hub account is
+          # written literally in that file, so only the tag travels.
+          export IMAGE_TAG
+
+          echo "::group::Pulling $IMAGE_TAG"
+          docker compose -f docker-compose.prod.yml pull
+          echo "::endgroup::"
+
+          echo "::group::Applying schema"
+          # Runs to completion before any app starts. Idempotent, so a deploy
+          # with no schema change is a no-op rather than a risk.
+          docker compose -f docker-compose.prod.yml up --no-deps --exit-code-from db-init db-init
+          echo "::endgroup::"
+
+          echo "::group::Restarting services"
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+          echo "::endgroup::"
+
+          # Reclaim disk from superseded images. A VPS with a small disk will
+          # otherwise fill up after a few dozen deploys and fail the next pull
+          # with a confusing "no space left on device".
+          docker image prune -f --filter "until=168h"
+          REMOTE
+
+      # Proves the rollout actually worked. Without this the job goes green as
+      # long as `compose up` returned 0 — which it does even when a container
+      # starts, crashes on a bad env var, and enters a restart loop.
+      - name: Verify the stack is healthy
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_PORT: ${{ secrets.VPS_SSH_PORT || '22' }}
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
+        run: |
+          ssh -p "$VPS_SSH_PORT" "$VPS_USER@$VPS_HOST" \
+            APP_DIR="$VPS_APP_DIR" 'bash -euo pipefail -s' <<'REMOTE'
+          cd "$APP_DIR"
+
+          # Give the containers their start-period before judging them.
+          for i in $(seq 1 30); do
+            unhealthy=$(docker compose -f docker-compose.prod.yml ps \
+              --format '{{.Service}} {{.State}} {{.Health}}' \
+              | awk '$2 == "running" && $3 != "" && $3 != "healthy"' | wc -l)
+            [ "$unhealthy" -eq 0 ] && break
+            sleep 5
+          done
+
+          echo "--- final state ---"
+          docker compose -f docker-compose.prod.yml ps
+
+          # Anything running but not healthy fails the deploy loudly.
+          bad=$(docker compose -f docker-compose.prod.yml ps \
+            --format '{{.Service}} {{.State}} {{.Health}}' \
+            | awk '$2 == "running" && $3 != "" && $3 != "healthy"' || true)
+          if [ -n "$bad" ]; then
+            echo "UNHEALTHY after rollout:"
+            echo "$bad"
+            docker compose -f docker-compose.prod.yml logs --tail=60
+            exit 1
+          fi
+          echo "All services healthy."
+          REMOTE

@@ -12,8 +12,8 @@ export interface SessionClaims {
   username: string;
 }
 
-const ISSUER = "combateone";
-const AUDIENCE = "combateone-web";
+const ISSUER = "spidder";
+const AUDIENCE = "spidder-web";
 
 function secretKey(secret: string): Uint8Array {
   return new TextEncoder().encode(secret);
@@ -54,7 +54,7 @@ export { hashPassword, verifyPassword } from "./password.js";
 
 /* --- Admin session -------------------------------------------------------- */
 
-const ADMIN_AUDIENCE = "combateone-admin";
+const ADMIN_AUDIENCE = "spidder-admin";
 
 /** Claims carried by a super-admin session JWT. */
 export interface AdminClaims {

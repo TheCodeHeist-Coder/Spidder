@@ -1,0 +1,133 @@
+###############################################################################
+# CI — runs on every push and pull request.
+#
+# Three jobs in parallel (quality, test, build) rather than one long chain, so
+# a type error and a failing test surface together instead of one hiding the
+# other behind a 6-minute queue.
+#
+# Docker images are NOT built here. Building four images on every branch push
+# would dominate the run time and produce artifacts nobody installs. The deploy
+# workflow builds them, once, when something is actually shipping.
+###############################################################################
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+# A second push to the same branch cancels the first. Nobody is waiting on the
+# results of a commit that has already been replaced.
+#
+# `main` is deliberately excluded from cancellation: its runs gate the deploy,
+# and a cancelled run there would leave a commit with no verdict at all.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Keep in lockstep with the root package.json "packageManager" field and the
+  # PNPM_VERSION arg in every Dockerfile.prod.
+  PNPM_VERSION: 10.19.0
+  NODE_VERSION: 22
+
+jobs:
+  quality:
+    name: Lint & types
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # --frozen-lockfile fails if pnpm-lock.yaml does not match the manifests.
+      # That is the point: a lockfile drifting from package.json is how a build
+      # that passes CI installs different versions in production.
+      - run: pnpm install --frozen-lockfile
+
+      # @repo/db's build runs `prisma generate`. Without it the generated client
+      # does not exist and every downstream typecheck fails on missing imports,
+      # which looks like a hundred unrelated errors rather than one missing step.
+      - name: Generate Prisma client
+        run: pnpm --filter @repo/db build
+
+      - name: Typecheck
+        run: pnpm check-types
+
+      - name: Lint
+        run: pnpm lint
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # @repo/game imports @repo/protocol, whose types resolve to its dist/.
+      # A fresh checkout has no dist/, so `tsc` inside the test script fails
+      # with "Cannot find module '@repo/protocol'" — a missing build step that
+      # reads like a broken import. Locally it passes only because dist/ is
+      # left over from a previous build.
+      - name: Build workspace dependencies
+        run: pnpm --filter @repo/game^... build
+
+      # @repo/game is the only package with tests, and it is deliberately
+      # database-free so it needs no services here. Called by filter rather than
+      # `turbo run test` because turbo.json defines no `test` task — adding one
+      # just to reach a single package would be indirection for its own sake.
+      - name: Game logic tests
+        run: pnpm --filter @repo/game test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Compiles every app and package exactly as the Dockerfiles do. Catches
+      # the class of failure that only appears in a real build — a bad import
+      # path, a Next.js page that throws while being prerendered — before the
+      # deploy workflow spends ten minutes discovering it inside Docker.
+      #
+      # NEXT_PUBLIC_* are inlined into the client bundle at build time. The
+      # placeholders here are never shipped: the deploy workflow rebuilds the
+      # web image with the real public origins as build args.
+      - name: Build all packages
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:4001
+          NEXT_PUBLIC_WS_URL: ws://localhost:4002/ws
+        run: pnpm build
