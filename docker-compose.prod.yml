@@ -1,303 +1,172 @@
-# Spidder — production deployment.
-#
-#   docker compose -f docker-compose.prod.yml up -d
-#
-# Postgres and Redis run on the VPS itself, not here. This file only runs the
-# application containers, and they reach the host through host.docker.internal.
-# Setup notes are at the bottom of this file.
-
-name: spidder
-
 services:
-  # ---------------------------------------------------------------------------
-  # Code sandbox. Runs untrusted user submissions, so it needs privileged mode
-  # to build its own isolation cgroups.
-  #
-  # No published port on purpose: only judge-worker talks to it, over the
-  # compose network. Nothing outside should reach an API that executes
-  # arbitrary code.
-  # ---------------------------------------------------------------------------
-  piston:
-    image: ghcr.io/engineer-man/piston
-    restart: unless-stopped
-    privileged: true
-    volumes:
-      - pistondata:/piston
-    healthcheck:
-      # The piston image ships Node 15 — no fetch, no curl, no wget. http.get
-      # is the only probe available.
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "require('http').get('http://127.0.0.1:2000/api/v2/runtimes',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
-        ]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
 
-  # ---------------------------------------------------------------------------
-  # Installs the Python runtime into piston, then exits. Idempotent, so it is
-  # safe to re-run on every deploy. judge-worker waits for it to finish.
-  # ---------------------------------------------------------------------------
-  piston-init:
-    image: alpine:3.20
-    restart: "no"
-    depends_on:
-      piston:
-        condition: service_healthy
-    environment:
-      PISTON_URL: http://piston:2000/api/v2
-    volumes:
-      - ./docker/piston-init/provision.sh:/provision.sh:ro
-    entrypoint: ["/bin/sh", "/provision.sh"]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    nginx:
+        image: jc21/nginx-proxy-manager:latest
+        container_name: spidder-nginx
+        restart: always
+        ports:
+            - "80:80"
+            - "443:443"
+            - "81:81"
+        volumes:
+            - nginx_data:/data
+            - letsencrypt:/etc/letsencrypt
+        networks:
+            - spidder-network
+        depends_on:
+            - web
+            - http-api
+            - ws-server
 
-  # ---------------------------------------------------------------------------
-  # Applies the Prisma schema to the host Postgres and seeds problems, then
-  # exits. Every app service waits for it to succeed, so nothing ever starts
-  # against an unmigrated database.
-  #
-  # NOT a database — it is a one-shot client that connects to the Postgres you
-  # run on the VPS.
-  #
-  # WARNING: the seed currently deletes all problems and test cases before
-  # re-inserting, and `prisma db push` force-converges the schema with no
-  # migration history. Both are fine against a throwaway dev database and
-  # dangerous against a real one. See the note at the bottom of this file.
-  # ---------------------------------------------------------------------------
-  db-init:
-    image: codeheist/spidder-db-init:${IMAGE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: docker/db-init/Dockerfile
-    restart: "no"
-    environment:
-      DATABASE_URL: ${DATABASE_URL:?point this at the host Postgres}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    web:
+        build:
+            context: .
+            dockerfile: apps/web/Dockerfile.prod
+            args:
+                # Compiled into the browser bundle at build time, so these are
+                # the URLs a BROWSER uses — public https:// origins, never
+                # container names. Changing them needs a rebuild, not a restart.
+                #
+                # Build args do NOT come from env_file — only from the shell or
+                # a `.env` beside this file. CI exports them before building.
+                # The placeholders are never shipped: the server pulls a finished
+                # image and never builds, and they exist only so `pull`, `ps` and
+                # `up -d` on the VPS do not fail interpolating a value that is
+                # irrelevant there.
+                NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4001}
+                NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:4002/ws}
+        image: codeheist/spidder-web:${IMAGE_TAG:-latest}
+        container_name: spidder-web-prod
+        restart: always
+        env_file:
+            - .env.prod
+        networks:
+            - spidder-network
+        depends_on:
+            - http-api
+            - ws-server
 
-  # ---------------------------------------------------------------------------
-  # REST API. Published to loopback only — the reverse proxy on the host
-  # terminates TLS and forwards here. Binding 0.0.0.0 would expose plaintext
-  # HTTP publicly and bypass the proxy.
-  # ---------------------------------------------------------------------------
-  http-api:
-    image: codeheist/spidder-http-api:${IMAGE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: apps/http-api/Dockerfile.prod
-    restart: unless-stopped
-    depends_on:
-      db-init:
-        condition: service_completed_successfully
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:?point this at the host Postgres}
-      REDIS_URL: ${REDIS_URL:?point this at the host Redis}
-      PISTON_URL: http://piston:2000/api/v2
-      JWT_SECRET: ${JWT_SECRET:?generate one with `openssl rand -hex 32`}
-      CORS_ORIGINS: ${CORS_ORIGINS:?e.g. https://spidder.example.com}
-      HTTP_API_HOST: 0.0.0.0
-      HTTP_API_PORT: 4001
-      # How http-api reaches ws-server for the admin dashboard's live connection
-      # counts — server to server, never through the proxy. Must be set: the
-      # code defaults to localhost:4002, which inside this container is itself,
-      # and the admin stats panel would fail silently.
-      WS_SERVER_INTERNAL_URL: http://ws-server:4002
-      # Optional. Creates the first admin account on boot if absent.
-      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-}
-      SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD:-}
-      SUPER_ADMIN_USERNAME: ${SUPER_ADMIN_USERNAME:-}
-    ports:
-      - "127.0.0.1:${HTTP_API_PORT:-4001}:4001"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    http-api:
+        build:
+            context: .
+            dockerfile: apps/http-api/Dockerfile.prod
+        image: codeheist/spidder-http-api:${IMAGE_TAG:-latest}
+        container_name: spidder-http-api-prod
+        restart: always
+        env_file:
+            - .env.prod
+        environment:
+            # Server-to-server, for the admin dashboard's live connection
+            # counts. Must be set: the code defaults to localhost:4002, which
+            # inside this container is the container itself.
+            - WS_SERVER_INTERNAL_URL=http://ws-server:4002
+        networks:
+            - spidder-network
+        # PostgreSQL and Redis run on the host, not in Docker. This maps
+        # host.docker.internal to the docker bridge gateway so .env.prod can
+        # address them; there is no db service to depend_on.
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
 
-  # ---------------------------------------------------------------------------
-  # WebSocket server — live battle state. Loopback only, same proxy reasoning
-  # as http-api.
-  # ---------------------------------------------------------------------------
-  ws-server:
-    image: codeheist/spidder-ws-server:${IMAGE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: apps/ws-server/Dockerfile.prod
-    restart: unless-stopped
-    depends_on:
-      db-init:
-        condition: service_completed_successfully
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:?point this at the host Postgres}
-      REDIS_URL: ${REDIS_URL:?point this at the host Redis}
-      PISTON_URL: http://piston:2000/api/v2
-      JWT_SECRET: ${JWT_SECRET:?generate one with `openssl rand -hex 32`}
-      CORS_ORIGINS: ${CORS_ORIGINS:?e.g. https://spidder.example.com}
-      WS_SERVER_HOST: 0.0.0.0
-      WS_SERVER_PORT: 4002
-    ports:
-      - "127.0.0.1:${WS_SERVER_PORT:-4002}:4002"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    ws-server:
+        build:
+            context: .
+            dockerfile: apps/ws-server/Dockerfile.prod
+        image: codeheist/spidder-ws-server:${IMAGE_TAG:-latest}
+        container_name: spidder-ws-server-prod
+        restart: always
+        env_file:
+            - .env.prod
+        networks:
+            - spidder-network
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
 
-  # ---------------------------------------------------------------------------
-  # Judge queue consumer. No published port — it pulls jobs from Redis and
-  # sends code to piston; nothing connects to it.
-  # ---------------------------------------------------------------------------
-  judge-worker:
-    image: codeheist/spidder-judge-worker:${IMAGE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: apps/judge-worker/Dockerfile.prod
-    restart: unless-stopped
-    depends_on:
-      db-init:
-        condition: service_completed_successfully
-      piston-init:
-        condition: service_completed_successfully
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:?point this at the host Postgres}
-      REDIS_URL: ${REDIS_URL:?point this at the host Redis}
-      PISTON_URL: http://piston:2000/api/v2
-      JWT_SECRET: ${JWT_SECRET:?generate one with `openssl rand -hex 32`}
-      CORS_ORIGINS: ${CORS_ORIGINS:?e.g. https://spidder.example.com}
-      JUDGE_CONCURRENCY: ${JUDGE_CONCURRENCY:-4}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    judge-worker:
+        build:
+            context: .
+            dockerfile: apps/judge-worker/Dockerfile.prod
+        image: codeheist/spidder-judge-worker:${IMAGE_TAG:-latest}
+        container_name: spidder-judge-worker-prod
+        restart: always
+        env_file:
+            - .env.prod
+        networks:
+            - spidder-network
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        depends_on:
+            piston:
+                condition: service_healthy
 
-  # ---------------------------------------------------------------------------
-  # Next.js frontend. No host access: it never talks to Postgres or Redis, only
-  # to http-api and ws-server — and from the browser, not from the container.
-  # ---------------------------------------------------------------------------
-  web:
-    image: codeheist/spidder-web:${IMAGE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile.prod
-      args:
-        # Compiled into the browser bundle at build time, so these are the URLs
-        # a BROWSER uses — public https:// origins, never compose service names.
-        # Changing them needs a rebuild, not a restart.
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?the public API origin}
-        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:?the public WebSocket origin}
-    restart: unless-stopped
-    depends_on:
-      http-api:
-        condition: service_healthy
-      ws-server:
-        condition: service_healthy
-    environment:
-      NODE_ENV: production
-      PORT: 3001
-      HOSTNAME: 0.0.0.0
-    ports:
-      - "127.0.0.1:${WEB_PORT:-3001}:3001"
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    piston:
+        image: ghcr.io/engineer-man/piston
+        container_name: spidder-piston-prod
+        restart: always
+        # Needs privileged mode to build its own isolation cgroups. No
+        # published port: only judge-worker talks to it, over this network.
+        privileged: true
+        volumes:
+            - piston_data:/piston
+        networks:
+            - spidder-network
+        healthcheck:
+            # The piston image ships Node 15 — no fetch, no curl, no wget.
+            test: [ "CMD", "node", "-e", "require('http').get('http://127.0.0.1:2000/api/v2/runtimes',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))" ]
+            interval: 15s
+            timeout: 5s
+            retries: 20
+            start_period: 30s
+
+    # Installs the Python runtime into piston, then exits. Idempotent.
+    piston-init:
+        image: alpine:3.20
+        container_name: spidder-piston-init-prod
+        restart: "no"
+        environment:
+            - PISTON_URL=http://piston:2000/api/v2
+        volumes:
+            - ./docker/piston-init/provision.sh:/provision.sh:ro
+        entrypoint: [ "/bin/sh", "/provision.sh" ]
+        networks:
+            - spidder-network
+        depends_on:
+            piston:
+                condition: service_healthy
+
+    # Applies Prisma migrations to the host PostgreSQL, then exits.
+    #
+    # NOT a database — it is a one-shot client carrying the Prisma CLI, which
+    # the slim app images do not include. Run it by hand when a release carries
+    # a schema change; nothing starts it automatically:
+    #
+    #   docker compose -f docker-compose.prod.yml run --rm db-init
+    db-init:
+        build:
+            context: .
+            dockerfile: docker/db-init/Dockerfile
+        image: codeheist/spidder-db-init:${IMAGE_TAG:-latest}
+        container_name: spidder-db-init-prod
+        restart: "no"
+        env_file:
+            - .env.prod
+        networks:
+            - spidder-network
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+
+    # No db or redis services: PostgreSQL and Redis are installed on the host
+    # via apt and reached through host.docker.internal. The host must let them
+    # in — postgresql.conf needs listen_addresses = 'localhost,172.17.0.1',
+    # pg_hba.conf needs the 172.16.0.0/12 bridge subnet, and redis.conf needs
+    # bind 127.0.0.1 172.17.0.1 with requirepass set. Keep 5432 and 6379
+    # firewalled off the public internet.
+
+networks:
+    spidder-network:
+        driver: bridge
 
 volumes:
-  # Piston's downloaded language runtimes. Losing this volume only means
-  # piston-init downloads Python again on the next boot.
-  pistondata:
-# =============================================================================
-# SERVER SETUP
-# =============================================================================
-#
-# POSTGRES AND REDIS ON THE HOST
-# ------------------------------
-# Both run on the VPS, not in this file. The containers reach them through
-# `host.docker.internal`, which resolves only because of the `extra_hosts`
-# mapping on each service above — Linux needs that spelled out, Docker Desktop
-# provides it for free. That difference is a common "works on my machine" trap.
-#
-# The host services must also listen on the docker bridge, or every connection
-# hangs and then times out:
-#
-#   postgresql.conf   listen_addresses = 'localhost,172.17.0.1'
-#   pg_hba.conf       host  spidder  spidder  172.16.0.0/12  scram-sha-256
-#
-#   redis.conf        bind 127.0.0.1 172.17.0.1
-#                     requirepass <a long random string>
-#                     protected-mode yes
-#
-# A Redis reachable from the bridge without a password is reachable by anything
-# that gets a shell in any container. Keep 5432 and 6379 firewalled off the
-# public internet — the bridge is a door for containers, not for the world.
-#
-# SECRETS
-# -------
-# Everything comes from a `.env` file next to this one. Credentials have no
-# fallback defaults on purpose: a missing DATABASE_URL should stop the deploy,
-# not start a stack pointed at a database that does not exist.
-#
-# IMAGES
-# ------
-# Pulled from Docker Hub as `codeheist/spidder-<service>`. The `build:` blocks
-# exist so CI can build and push them; the server only ever pulls.
-#
-# IMAGE_TAG defaults to `latest` so a bare `up -d` works. The deploy workflow
-# sets it to the commit SHA, which is what makes a rollback a tag change rather
-# than a revert and rebuild.
-#
-# Forking? Change `codeheist` above to your own Docker Hub account and set
-# DOCKERHUB_USERNAME to match. Leave it, and your server keeps pulling this
-# project's images while your CI pushes to yours — a deploy that reports
-# success and changes nothing.
-#
-# KNOWN RISK: db-init
-# -------------------
-# db-init is safe to re-run today only because the database is disposable. Two
-# things make it dangerous against a database you care about:
-#
-#   1. prisma/seed.ts calls deleteMany() on problems and test cases before
-#      re-inserting. That destroys community-submitted and admin-authored
-#      problems. Once real battles reference a problem, the delete is instead
-#      REFUSED (Battle.assignedProblemId has no onDelete rule), db-init exits
-#      non-zero, and every app gated on it refuses to start — a routine deploy
-#      takes the site down.
-#
-#   2. `prisma db push` force-converges the schema with no migration history
-#      and no review step. A column rename becomes a drop and recreate.
-#
-# Until both are fixed, do not let the deploy workflow run db-init against
-# production data. Run it by hand when you intend a schema change:
-#
-#   docker compose -f docker-compose.prod.yml run --rm db-init
-#
-# And take a backup first: pg_dump on a timer, before real traffic arrives.
-# =============================================================================
+    piston_data:
+    nginx_data:
+    letsencrypt:

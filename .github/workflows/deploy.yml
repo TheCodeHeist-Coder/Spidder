@@ -286,11 +286,21 @@ jobs:
           docker compose -f docker-compose.prod.yml pull
           echo "::endgroup::"
 
-          echo "::group::Applying schema"
-          # Runs to completion before any app starts. Idempotent, so a deploy
-          # with no schema change is a no-op rather than a risk.
-          docker compose -f docker-compose.prod.yml up --no-deps --exit-code-from db-init db-init
-          echo "::endgroup::"
+          # NO SCHEMA STEP HERE, deliberately.
+          #
+          # A deploy pulls images and restarts containers. It must not alter the
+          # database as a side effect: the old step ran db-init on every push to
+          # main, and db-init re-runs a seed that DELETES every problem and test
+          # case before re-inserting three samples.
+          #
+          # Apply a schema change yourself, on the server, when a release
+          # actually carries one:
+          #
+          #   docker compose -f docker-compose.prod.yml run --rm db-init
+          #
+          # The tradeoff is explicit: forget it and the apps run against the old
+          # schema until you remember. A visible failure beats a deploy that can
+          # quietly rewrite data.
 
           echo "::group::Restarting services"
           docker compose -f docker-compose.prod.yml up -d --remove-orphans
