@@ -33,18 +33,18 @@
 # Optional:
 #   VPS_SSH_PORT        defaults to 22
 #
-# The five images are published as:
-#   codeheist/spidder-{http-api,ws-server,judge-worker,web,db-init}
+# The six images are published as:
+#   codeheist/spidder-{http-api,ws-server,judge-worker,web,admin,db-init}
 #
 # DOCKERHUB_USERNAME supplies that namespace when PUSHING here; the compose
 # file on the server writes `codeheist` literally when PULLING. Change one and
 # you must change the other, or CI pushes somewhere the server never looks.
 #
-# Docker Hub's free tier gives ONE private repository. Five private images
-# means a paid plan; otherwise create the five repos as public. They contain
+# Docker Hub's free tier gives ONE private repository. Six private images
+# means a paid plan; otherwise create the six repos as public. They contain
 # only compiled application code — no secrets, since every credential is
-# injected at runtime from the server's .env. The one exception is the `web`
-# image: NEXT_PUBLIC_* are compiled into its browser bundle, and those are
+# injected at runtime from the server's .env. The exceptions are `web` and
+# `admin`: NEXT_PUBLIC_* are compiled into their browser bundles, and those are
 # public URLs by definition, visible in any visitor's devtools anyway.
 ###############################################################################
 
@@ -119,9 +119,9 @@ jobs:
         run: pnpm --filter @repo/game test
 
   # ---------------------------------------------------------------------------
-  # Build the five images in parallel and push them to Docker Hub.
+  # Build the six images in parallel and push them to Docker Hub.
   #
-  # A matrix rather than five copies of the same block: the only thing that
+  # A matrix rather than six copies of the same block: the only thing that
   # differs is the Dockerfile path and the image name.
   # ---------------------------------------------------------------------------
   build:
@@ -135,7 +135,7 @@ jobs:
       # GITHUB_TOKEN push to GHCR — would be an unused grant.
       contents: read
     strategy:
-      # One image failing should not cancel the other four — seeing every
+      # One image failing should not cancel the other five — seeing every
       # failure in one run beats fixing them one deploy at a time.
       fail-fast: false
       matrix:
@@ -148,6 +148,8 @@ jobs:
             dockerfile: apps/judge-worker/Dockerfile.prod
           - name: web
             dockerfile: apps/web/Dockerfile.prod
+          - name: admin
+            dockerfile: apps/admin/Dockerfile.prod
           - name: db-init
             dockerfile: docker/db-init/Dockerfile
     steps:
@@ -201,7 +203,7 @@ jobs:
           # NEXT_PUBLIC_* are inlined into the CLIENT bundle at build time, so
           # the real public origins have to be present HERE. Passing them at
           # runtime would leave the browser calling localhost in production.
-          # Harmless for the other four images, which ignore them.
+          # web and admin both consume them; harmless for the rest.
           build-args: |
             NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
             NEXT_PUBLIC_WS_URL=${{ secrets.NEXT_PUBLIC_WS_URL }}

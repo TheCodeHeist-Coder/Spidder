@@ -36,6 +36,26 @@ services:
             - http-api
             - ws-server
 
+    admin:
+        build:
+            context: .
+            dockerfile: apps/admin/Dockerfile.prod
+            args:
+                # Baked into the browser bundle, same as web. Admin talks only
+                # to the REST API, so it needs no WS URL.
+                NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4001}
+        image: codeheist/spidder-admin:${IMAGE_TAG:-latest}
+        container_name: spidder-admin-prod
+        restart: always
+        env_file:
+            - .env.prod
+        ports:
+            - "127.0.0.1:3002:3002"
+        networks:
+            - spidder-network
+        depends_on:
+            - http-api
+
     http-api:
         build:
             context: .
