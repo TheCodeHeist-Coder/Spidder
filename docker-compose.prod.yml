@@ -1,22 +1,10 @@
-services:
+# nginx is NOT here. It runs on the host, where it also holds the certbot
+# certificates. Each service below publishes to 127.0.0.1 only, so the proxy can
+# reach it while the public internet cannot — binding 0.0.0.0 would expose
+# plaintext HTTP and let anyone bypass TLS. See DEPLOYMENT.md for the server
+# blocks and the certbot steps.
 
-    nginx:
-        image: jc21/nginx-proxy-manager:latest
-        container_name: spidder-nginx
-        restart: always
-        ports:
-            - "80:80"
-            - "443:443"
-            - "81:81"
-        volumes:
-            - nginx_data:/data
-            - letsencrypt:/etc/letsencrypt
-        networks:
-            - spidder-network
-        depends_on:
-            - web
-            - http-api
-            - ws-server
+services:
 
     web:
         build:
@@ -40,6 +28,8 @@ services:
         restart: always
         env_file:
             - .env.prod
+        ports:
+            - "127.0.0.1:3001:3001"
         networks:
             - spidder-network
         depends_on:
@@ -60,6 +50,8 @@ services:
             # counts. Must be set: the code defaults to localhost:4002, which
             # inside this container is the container itself.
             - WS_SERVER_INTERNAL_URL=http://ws-server:4002
+        ports:
+            - "127.0.0.1:4001:4001"
         networks:
             - spidder-network
         # PostgreSQL and Redis run on the host, not in Docker. This maps
@@ -77,6 +69,8 @@ services:
         restart: always
         env_file:
             - .env.prod
+        ports:
+            - "127.0.0.1:4002:4002"
         networks:
             - spidder-network
         extra_hosts:
@@ -168,5 +162,3 @@ networks:
 
 volumes:
     piston_data:
-    nginx_data:
-    letsencrypt:
