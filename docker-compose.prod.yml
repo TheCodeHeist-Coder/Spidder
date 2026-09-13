@@ -35,6 +35,11 @@ services:
         depends_on:
             - http-api
             - ws-server
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
 
     admin:
         build:
@@ -55,6 +60,11 @@ services:
             - spidder-network
         depends_on:
             - http-api
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
 
     http-api:
         build:
@@ -79,6 +89,11 @@ services:
         # address them; there is no db service to depend_on.
         extra_hosts:
             - "host.docker.internal:host-gateway"
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
 
     ws-server:
         build:
@@ -95,6 +110,11 @@ services:
             - spidder-network
         extra_hosts:
             - "host.docker.internal:host-gateway"
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
 
     judge-worker:
         build:
@@ -112,6 +132,11 @@ services:
         depends_on:
             piston:
                 condition: service_healthy
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
 
     piston:
         image: ghcr.io/engineer-man/piston
@@ -131,6 +156,11 @@ services:
             timeout: 5s
             retries: 20
             start_period: 30s
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
 
     # Installs the Python runtime into piston, then exits. Idempotent.
     piston-init:
@@ -147,27 +177,15 @@ services:
         depends_on:
             piston:
                 condition: service_healthy
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
 
-    # Applies Prisma migrations to the host PostgreSQL, then exits.
-    #
-    # NOT a database — it is a one-shot client carrying the Prisma CLI, which
-    # the slim app images do not include. Run it by hand when a release carries
-    # a schema change; nothing starts it automatically:
-    #
-    #   docker compose -f docker-compose.prod.yml run --rm db-init
-    db-init:
-        build:
-            context: .
-            dockerfile: docker/db-init/Dockerfile
-        image: codeheist/spidder-db-init:${IMAGE_TAG:-latest}
-        container_name: spidder-db-init-prod
-        restart: "no"
-        env_file:
-            - .env.prod
-        networks:
-            - spidder-network
-        extra_hosts:
-            - "host.docker.internal:host-gateway"
+    # No db-init service: the schema is applied by hand, from a checkout on the
+    # server, not by anything in this file. Nothing here can touch the database.
+    # See DEPLOYMENT.md section 5.
 
     # No db or redis services: PostgreSQL and Redis are installed on the host
     # via apt and reached through host.docker.internal. The host must let them
