@@ -11,27 +11,6 @@ only a passed-count — and the hidden tests never reach a client.
 
 ---
 
-## Quick start
-
-You need **Docker** and nothing else.
-
-```bash
-git clone https://github.com/TheCodeHeist-Coder/Spidder.git spidder
-cd spidder
-docker compose up --build
-```
-
-Open **<http://localhost:3001>**.
-
-On first boot the stack applies the database schema, seeds the problems, and
-installs the Python 3.12 runtime into the code sandbox — automatically. The app
-services wait for all of it, so the first request can never hit an unmigrated
-database or an empty sandbox.
-
-Your source is bind-mounted, so this is already the hot-reload stack: edit a
-file on your host and the containers pick it up in about a second.
-
-Full instructions, including running without Docker, are in **[SETUP.md](SETUP.md)**.
 
 ### Documentation
 
