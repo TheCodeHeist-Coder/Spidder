@@ -33,15 +33,15 @@
 # Optional:
 #   VPS_SSH_PORT        defaults to 22
 #
-# The six images are published as:
-#   codeheist/spidder-{http-api,ws-server,judge-worker,web,admin,db-init}
+# The five images are published as:
+#   codeheist/spidder-{http-api,ws-server,judge-worker,web,admin}
 #
 # DOCKERHUB_USERNAME supplies that namespace when PUSHING here; the compose
 # file on the server writes `codeheist` literally when PULLING. Change one and
 # you must change the other, or CI pushes somewhere the server never looks.
 #
-# Docker Hub's free tier gives ONE private repository. Six private images
-# means a paid plan; otherwise create the six repos as public. They contain
+# Docker Hub's free tier gives ONE private repository. Five private images
+# means a paid plan; otherwise create the five repos as public. They contain
 # only compiled application code — no secrets, since every credential is
 # injected at runtime from the server's .env. The exceptions are `web` and
 # `admin`: NEXT_PUBLIC_* are compiled into their browser bundles, and those are
@@ -119,9 +119,9 @@ jobs:
         run: pnpm --filter @repo/game test
 
   # ---------------------------------------------------------------------------
-  # Build the six images in parallel and push them to Docker Hub.
+  # Build the five images in parallel and push them to Docker Hub.
   #
-  # A matrix rather than six copies of the same block: the only thing that
+  # A matrix rather than five copies of the same block: the only thing that
   # differs is the Dockerfile path and the image name.
   # ---------------------------------------------------------------------------
   build:
@@ -135,7 +135,7 @@ jobs:
       # GITHUB_TOKEN push to GHCR — would be an unused grant.
       contents: read
     strategy:
-      # One image failing should not cancel the other five — seeing every
+      # One image failing should not cancel the other four — seeing every
       # failure in one run beats fixing them one deploy at a time.
       fail-fast: false
       matrix:
@@ -150,8 +150,6 @@ jobs:
             dockerfile: apps/web/Dockerfile.prod
           - name: admin
             dockerfile: apps/admin/Dockerfile.prod
-          - name: db-init
-            dockerfile: docker/db-init/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -290,19 +288,13 @@ jobs:
 
           # NO SCHEMA STEP HERE, deliberately.
           #
-          # A deploy pulls images and restarts containers. It must not alter the
-          # database as a side effect: the old step ran db-init on every push to
-          # main, and db-init re-runs a seed that DELETES every problem and test
-          # case before re-inserting three samples.
+          # A deploy pulls images and restarts containers; nothing in this
+          # pipeline can reach the database. Schema changes are applied by hand
+          # on the server — see DEPLOYMENT.md section 5.
           #
-          # Apply a schema change yourself, on the server, when a release
-          # actually carries one:
-          #
-          #   docker compose -f docker-compose.prod.yml run --rm db-init
-          #
-          # The tradeoff is explicit: forget it and the apps run against the old
-          # schema until you remember. A visible failure beats a deploy that can
-          # quietly rewrite data.
+          # The tradeoff is explicit: ship a release that needs a migration and
+          # forget to run it, and the apps fail against the old schema until you
+          # do. A visible failure beats a deploy that can rewrite data.
 
           echo "::group::Restarting services"
           docker compose -f docker-compose.prod.yml up -d --remove-orphans
